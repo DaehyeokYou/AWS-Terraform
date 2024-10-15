@@ -43,7 +43,6 @@ module "eks" {
   cluster_name    = local.cluster_name
   cluster_version = "1.28"
   subnet_ids      = module.vpc.private_subnets
-
   vpc_id = module.vpc.vpc_id
 
   eks_managed_node_group_defaults = {
@@ -67,6 +66,40 @@ module "eks" {
 
   cluster_endpoint_private_access = true
   cluster_endpoint_public_access  = false
+}
+
+# Auto Scaling 그룹 데이터 소스
+data "aws_autoscaling_groups" "eks_nodes" {
+  filter {
+    name   = "tag:eks:cluster-name"
+    values = [local.cluster_name]
+  }
+
+  depends_on = [module.eks]
+}
+
+# 평일 오전 9시 스케줄 (노드 수 증가)
+resource "aws_autoscaling_schedule" "scale_up" {
+  count                  = length(data.aws_autoscaling_groups.eks_nodes.names)
+  scheduled_action_name  = "scale_up"
+  min_size               = 2
+  max_size               = 2
+  desired_capacity       = 2
+  recurrence             = "0 9 * * MON-FRI"
+  time_zone              = "Asia/Seoul"
+  autoscaling_group_name = data.aws_autoscaling_groups.eks_nodes.names[count.index]
+}
+
+# 평일 오후 8시 스케줄 (노드 수 감소)
+resource "aws_autoscaling_schedule" "scale_down" {
+  count                  = length(data.aws_autoscaling_groups.eks_nodes.names)
+  scheduled_action_name  = "scale_down"
+  min_size               = 0
+  max_size               = 2
+  desired_capacity       = 0
+  recurrence             = "0 20 * * MON-FRI"
+  time_zone              = "Asia/Seoul"
+  autoscaling_group_name = data.aws_autoscaling_groups.eks_nodes.names[count.index]
 }
 
 resource "aws_security_group" "terraform_all_worker_mgmt" {
